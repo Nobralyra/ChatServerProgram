@@ -194,3 +194,7 @@ dmypy.json
 .pyre/
 
 # End of https://www.gitignore.io/api/python,pycharm
+/ChatServerProgram.iml
+/misc.xml
+/modules.xml
+/vcs.xml

@@ -2,6 +2,8 @@ import socket
 import sys
 
 # Create a UDP socket
+import self
+
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 server_IP = "127.0.0.1"
 server_PORT = 9090
@@ -39,20 +41,21 @@ def handshake():
                 print("C: " + receive_ack.decode())
                 handshake_approved = "Handshake approved!"
                 sock.sendto(handshake_approved.encode(), (ip, port))
-                receive_message()
+                return True
 
             # If the SYN_ACK check failed at Client. Client sends error message before closing the socket.
             # The Server then also close the socket and exit the program with 1 (something unexpected happen)
             elif receive_ack.decode() == "Invalid SYN_ACK. Closing Client":
                 error_with_syn_ack_handshake = "Invalid SYN_ACK. Closing Server and Client"
                 print("C: " + error_with_syn_ack_handshake)
-                return
+                return False
 
             # If the ACK check fails, Server print and sends an error message to Client and close the socket.
             else:
                 error_with_handshake_client = "Invalid ACK request. Closing Server"
                 print("S: " + error_with_handshake_client)
                 sock.sendto(error_with_handshake_client.encode(), address)
+                return False
 
         # If the SYN check fails, Server print and sends an error message to Client and close the socket.
         else:
@@ -66,10 +69,6 @@ def handshake():
 
     except OSError as error:
         print("OS error: {0}".format(error))
-
-    finally:
-        sock.close()
-        sys.exit(1)
 
 
 """
@@ -99,37 +98,44 @@ In the elif there is needed to add 1 to the sequence number so it is not falling
 def receive_message():
     """Try is for the exception that can happen and a finally that close the socket and give an exit code 1 that
     means something wrong happen """
+
+    global sequence_number
+    first_message = True
+    while True:
+        receive_message_from_client, address = sock.recvfrom(bytes_to_be_read)
+        print("C: " + receive_message_from_client.decode())
+
+        do_msg_match = receive_message_from_client.decode().split("-")[0]
+
+        do_seg_number_match = receive_message_from_client.decode().split(" ")[0].split("-")[1]
+
+        if do_msg_match.__eq__("msg") and do_seg_number_match.__eq__(str(sequence_number)) and first_message:
+            first_message = False
+            send_message(address)
+
+        elif do_msg_match.__eq__("msg") and do_seg_number_match.__eq__(str(sequence_number + 1)) and not first_message:
+            sequence_number += 1
+            send_message(address)
+
+        else:
+            error_with_message_client = "msg protocol has an error. Closing the server"
+            print("S: " + error_with_message_client)
+            sock.sendto(error_with_message_client.encode(), address)
+            return address
+
+
+def main():
     try:
-        global sequence_number
-        first_message = True
-        while True:
-            receive_message_from_client, address = sock.recvfrom(bytes_to_be_read)
-            print("C: " + receive_message_from_client.decode())
-
-            do_msg_match = receive_message_from_client.decode().split("-")[0]
-
-            do_seg_number_match = receive_message_from_client.decode().split(" ")[0].split("-")[1]
-
-            if do_msg_match.__eq__("msg") and do_seg_number_match.__eq__(str(sequence_number)) and first_message:
-                first_message = False
+        if handshake():
+            while True:
+                address = receive_message()
                 send_message(address)
-
-            elif do_msg_match.__eq__("msg") and do_seg_number_match.__eq__(str(sequence_number + 1)) and not first_message:
-                sequence_number += 1
-                send_message(address)
-
-            else:
-                error_with_message_client = "msg protocol has an error. Closing the server"
-                print("S: " + error_with_message_client)
-                sock.sendto(error_with_message_client.encode(), address)
-                # Invoke the timeout as if the timer run out.
-                sock.gettimeout()
-                return
 
     # If there is no messages from Client
     except socket.timeout:
-        timeout_server = "No activity from client"
-        print(timeout_server)
+        error_with_message_client = "con-res 0xFE"
+        print("S: " + error_with_message_client)
+        sock.sendto(error_with_message_client.encode(), address)
 
     except OSError as error:
         print("OS error: {0}".format(error))
@@ -139,5 +145,5 @@ def receive_message():
         sys.exit(1)
 
 
-if handshake():
-    receive_message()
+if __name__ == "__main__":
+        main()
