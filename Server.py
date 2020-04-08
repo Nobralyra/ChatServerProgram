@@ -1,9 +1,8 @@
 import socket
 import sys
+import time
 
 # Create a UDP socket
-import self
-
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 server_IP = "127.0.0.1"
 server_PORT = 9090
@@ -14,6 +13,8 @@ bytes_to_be_read = 4096
 # how many messages has been send
 sequence_number = 0
 sock.settimeout(4)
+client_IP = None
+client_PORT = None
 
 """
 The Server is listing after incoming connection request (SYN) from the Client. If the Client tries to connect, 
@@ -27,6 +28,8 @@ with 1 (something unexpected happen).
 
 
 def handshake():
+    global client_IP
+    global client_PORT
     try:
         receive_syn, (ip, port) = sock.recvfrom(bytes_to_be_read)
         print("C: " + receive_syn.decode())
@@ -41,6 +44,9 @@ def handshake():
                 print("C: " + receive_ack.decode())
                 handshake_approved = "Handshake approved!"
                 sock.sendto(handshake_approved.encode(), (ip, port))
+                client_IP = ip
+                client_PORT = port
+
                 return True
 
             # If the SYN_ACK check failed at Client. Client sends error message before closing the socket.
@@ -96,46 +102,70 @@ In the elif there is needed to add 1 to the sequence number so it is not falling
 
 
 def receive_message():
-    """Try is for the exception that can happen and a finally that close the socket and give an exit code 1 that
-    means something wrong happen """
-
     global sequence_number
     first_message = True
+
+    """The Server counts each message that it gets per second and if it recieves to many
+     per second then it closes the socket and exits"""
+    start_time = time.time()
+    maximum_packages_per_seconds = 0
     while True:
-        receive_message_from_client, address = sock.recvfrom(bytes_to_be_read)
-        print("C: " + receive_message_from_client.decode())
+        actual_time_since_start = time.time() - start_time
+        """Resets the timer and packets if there was not a DDOS every 2.9 seconds"""
+        if actual_time_since_start > 2.9:
+            start_time = time.time()
+            maximum_packages_per_seconds = 0
 
-        do_msg_match = receive_message_from_client.decode().split("-")[0]
-
-        do_seg_number_match = receive_message_from_client.decode().split(" ")[0].split("-")[1]
-
-        if do_msg_match.__eq__("msg") and do_seg_number_match.__eq__(str(sequence_number)) and first_message:
-            first_message = False
-            send_message(address)
-
-        elif do_msg_match.__eq__("msg") and do_seg_number_match.__eq__(str(sequence_number + 1)) and not first_message:
-            sequence_number += 1
-            send_message(address)
+        if maximum_packages_per_seconds >= 25:
+            limit_exceeded_packages = "Limit exceeded with maximum packages per seconds"
+            sock.sendto(limit_exceeded_packages.encode(), (client_IP, client_PORT))
+            print("S: " + limit_exceeded_packages)
+            break
 
         else:
-            error_with_message_client = "msg protocol has an error. Closing the server"
-            print("S: " + error_with_message_client)
-            sock.sendto(error_with_message_client.encode(), address)
-            return address
+            receive_message_from_client, address = sock.recvfrom(bytes_to_be_read)
+            print("C: " + receive_message_from_client.decode())
+            maximum_packages_per_seconds += 1
+
+            do_msg_match = receive_message_from_client.decode().split("-")[0]
+
+            do_seg_number_match = receive_message_from_client.decode().split(" ")[0].split("-")[1]
+
+            if do_msg_match.__eq__("msg") and do_seg_number_match.__eq__(str(sequence_number)) and first_message:
+                first_message = False
+                send_message(address)
+
+            elif do_msg_match.__eq__("msg") and do_seg_number_match.__eq__(str(sequence_number + 1)) and not first_message:
+                sequence_number += 1
+                send_message(address)
+
+                """Sends a heartbeat responds back to client"""
+            elif do_msg_match.__eq__("con") and do_seg_number_match.__eq__("h"):
+                accept_heartbeat = "con-a"
+                print("S: " + accept_heartbeat)
+                sock.sendto(accept_heartbeat.encode(), address)
+
+            else:
+                error_with_message_client = "msg protocol has an error. Closing the server"
+                print("S: " + error_with_message_client)
+                sock.sendto(error_with_message_client.encode(), address)
+                return False
 
 
 def main():
+    """Try is for the exception that can happen and a finally that close the socket and give an exit code 1 that
+    means something wrong happen """
     try:
         if handshake():
             while True:
-                address = receive_message()
-                send_message(address)
+                if not receive_message():
+                    break
 
-    # If there is no messages from Client
+    # If there is no message from Client then the Server informs the Client that it is closing the socket
     except socket.timeout:
-        error_with_message_client = "con-res 0xFE"
+        error_with_message_client = "0xFE"
         print("S: " + error_with_message_client)
-        sock.sendto(error_with_message_client.encode(), address)
+        sock.sendto(error_with_message_client.encode(), (client_IP, client_PORT))
 
     except OSError as error:
         print("OS error: {0}".format(error))
@@ -146,4 +176,4 @@ def main():
 
 
 if __name__ == "__main__":
-        main()
+    main()
