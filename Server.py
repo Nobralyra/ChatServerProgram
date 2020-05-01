@@ -1,6 +1,7 @@
 import socket
 import sys
 import time
+import logging
 
 # Create a UDP socket
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -16,6 +17,9 @@ sock.settimeout(4)
 client_IP = None
 client_PORT = None
 
+logging.basicConfig(level=logging.INFO, filename='server.log', format='%(asctime)s %(levelname)s:%(message)s')
+logger = logging.getLogger(__name__)
+
 """
 The Server is listing after incoming connection request (SYN) from the Client. If the Client tries to connect, 
 the Server and Client do the handshake. It checks if the Clients SYN and IP matches the SYN-protocol and IP on the 
@@ -30,51 +34,45 @@ with 1 (something unexpected happen).
 def handshake():
     global client_IP
     global client_PORT
-    try:
-        receive_syn, (ip, port) = sock.recvfrom(bytes_to_be_read)
-        print("C: " + receive_syn.decode())
 
-        if receive_syn.decode() == "com-0 " + ip:
-            syn_ack = "com-" + str(sequence_number) + " accept " + server_IP
-            print("S: " + syn_ack)
-            sock.sendto(syn_ack.encode(), (ip, port))
+    receive_syn, (client_IP, client_PORT) = sock.recvfrom(bytes_to_be_read)
+    logger.info("%s for: %s %d", receive_syn.decode(), client_IP, client_PORT)
+    print("C: " + receive_syn.decode())
 
-            receive_ack, address = sock.recvfrom(bytes_to_be_read)
-            if address == (ip, port) and receive_ack.decode() == "com-0 accept":
-                print("C: " + receive_ack.decode())
-                handshake_approved = "Handshake approved!"
-                sock.sendto(handshake_approved.encode(), (ip, port))
-                client_IP = ip
-                client_PORT = port
+    if receive_syn.decode() == "com-0 " + client_IP:
+        syn_ack = "com-" + str(sequence_number) + " accept " + server_IP
+        print("S: " + syn_ack)
+        logger.info("%s for: %s %d", syn_ack, client_IP, client_PORT)
+        sock.sendto(syn_ack.encode(), (client_IP, client_PORT))
 
-                return True
+        receive_ack, address = sock.recvfrom(bytes_to_be_read)
+        if address == (client_IP, client_PORT) and receive_ack.decode() == "com-0 accept":
+            print("C: " + receive_ack.decode())
+            handshake_approved = "Handshake approved!"
+            logger.info("%s for: %s %d", handshake_approved, client_IP, client_PORT)
+            sock.sendto(handshake_approved.encode(), (client_IP, client_PORT))
+            return True
 
-            # If the SYN_ACK check failed at Client. Client sends error message before closing the socket.
-            # The Server then also close the socket and exit the program with 1 (something unexpected happen)
-            elif receive_ack.decode() == "Invalid SYN_ACK. Closing Client":
-                error_with_syn_ack_handshake = "Invalid SYN_ACK. Closing Server and Client"
-                print("C: " + error_with_syn_ack_handshake)
-                return False
+        # If the SYN_ACK check failed at Client. Client sends error message before closing the socket.
+        # The Server then also close the socket and exit the program with 1 (something unexpected happen)
+        elif receive_ack.decode() == "Invalid SYN_ACK. Closing Client":
+            error_with_syn_ack_handshake = "Invalid SYN_ACK. Closing Server and Client"
+            print("C: " + error_with_syn_ack_handshake)
+            logger.warning("%s for: %s %d", error_with_syn_ack_handshake, client_IP, client_PORT)
 
-            # If the ACK check fails, Server print and sends an error message to Client and close the socket.
-            else:
-                error_with_handshake_client = "Invalid ACK request. Closing Server"
-                print("S: " + error_with_handshake_client)
-                sock.sendto(error_with_handshake_client.encode(), address)
-                return False
-
-        # If the SYN check fails, Server print and sends an error message to Client and close the socket.
+        # If the ACK check fails, Server print and sends an error message to Client and close the socket.
         else:
-            error_with_handshake_client = "Invalid SYN. Closing Server"
+            error_with_handshake_client = "Invalid ACK request. Closing Server"
             print("S: " + error_with_handshake_client)
-            sock.sendto(error_with_handshake_client.encode(), (ip, port))
+            logger.warning("%s for: %s %d", error_with_handshake_client, client_IP, client_PORT)
+            sock.sendto(error_with_handshake_client.encode(), client_IP, client_PORT)
 
-    # If there is no incoming connection request, SYN or ACK from Client
-    except socket.timeout:
-        print("No activity from client in handshake")
-
-    except OSError as error:
-        print("OS error: {0}".format(error))
+    # If the SYN check fails, Server print and sends an error message to Client and close the socket.
+    else:
+        error_with_handshake_client = "Invalid SYN. Closing Server"
+        print("S: " + error_with_handshake_client)
+        logger.warning("%s for: %s %d", error_with_handshake_client, client_IP, client_PORT)
+        sock.sendto(error_with_handshake_client.encode(), client_IP, client_PORT)
 
 
 """
@@ -116,10 +114,11 @@ def receive_message():
             start_time = time.time()
             maximum_packages_per_seconds = 0
 
-        if maximum_packages_per_seconds >= 25:
+        if maximum_packages_per_seconds >= 26:
             limit_exceeded_packages = "Limit exceeded with maximum packages per seconds"
             sock.sendto(limit_exceeded_packages.encode(), (client_IP, client_PORT))
             print("S: " + limit_exceeded_packages)
+            logger.warning("%s", limit_exceeded_packages)
             break
 
         else:
@@ -135,12 +134,14 @@ def receive_message():
                 first_message = False
                 send_message(address)
 
-            elif do_msg_match.__eq__("msg") and do_seg_number_match.__eq__(str(sequence_number + 1)) and not first_message:
+            elif do_msg_match.__eq__("msg") and do_seg_number_match.__eq__(sequence_number + 1) and not first_message:
                 sequence_number += 1
                 send_message(address)
 
-                """Sends a heartbeat responds back to client"""
-            elif do_msg_match.__eq__("con") and do_seg_number_match.__eq__("h"):
+            do_heart_beat_hex_match = receive_message_from_client.decode().split(" ")[1]
+
+            # Sends a heartbeat responds back to client
+            if do_msg_match.__eq__("con") and do_seg_number_match.__eq__("h") and do_heart_beat_hex_match.__eq__("0x00"):
                 accept_heartbeat = "con-a"
                 print("S: " + accept_heartbeat)
                 sock.sendto(accept_heartbeat.encode(), address)
@@ -148,6 +149,7 @@ def receive_message():
             else:
                 error_with_message_client = "msg protocol has an error. Closing the server"
                 print("S: " + error_with_message_client)
+                logger.warning("%s for: %s", error_with_message_client, address)
                 sock.sendto(error_with_message_client.encode(), address)
                 return False
 
@@ -165,12 +167,19 @@ def main():
     except socket.timeout:
         error_with_message_client = "0xFE"
         print("S: " + error_with_message_client)
+        logger.error("%s", socket.timeout, exc_info=True)
         sock.sendto(error_with_message_client.encode(), (client_IP, client_PORT))
 
     except OSError as error:
         print("OS error: {0}".format(error))
+        logger.error("%s", error, exc_info=True)
+
+    except ValueError as value_error:
+        print("OS error: {0}".format(value_error))
+        logger.error("%s", value_error, exc_info=True)
 
     finally:
+        logger.warning("Socket close and system exit 1")
         sock.close()
         sys.exit(1)
 
