@@ -1,8 +1,6 @@
 import multiprocessing
 import socket
 import sys
-import time
-
 import yaml
 from timeloop import Timeloop
 from datetime import timedelta
@@ -75,7 +73,9 @@ def send_message():
     global is_send_message
     print("Write a message")
     message = input()
-    message_to_server = "msg-" + str(sequence_number) + " = " + message
+
+    #Try to start at the wrong sequence number
+    message_to_server = "msg-" + str(sequence_number+1) + " = " + message
     sock.sendto(message_to_server.encode(), server_address)
     print("C: " + message_to_server)
     is_send_message = True
@@ -103,14 +103,14 @@ def receive_message():
 
         do_res_match = receive_message_from_server.decode().split("-")[0]
 
-        #When the server is closing it sends af 0xFe
+        # When the server is closing it sends af 0xFe
         if receive_message_from_server.decode().__eq__("0xFE"):
             tolerance_message = "0xFF"
             print("C: " + tolerance_message)
             sock.sendto(tolerance_message.encode(), server_address)
             return False
 
-        #If it the server closes because of to many packages
+        # If it the server closes because of to many packages
         if receive_message_from_server.decode().__eq__("Limit exceeded with maximum packages per seconds"):
             print("Server said no")
             return False
@@ -147,8 +147,8 @@ def main():
 
         read_DDoS()
         """If the package_per_seconds value is bigger than 0 then run DDOS"""
-        if package_per_seconds > 0:
-            DDoS_job_every_1s(package_per_seconds)
+        if isinstance(package_per_seconds, int) and not None and package_per_seconds > 0:
+            DDoS_job(package_per_seconds)
 
         while True:
             send_message()
@@ -179,12 +179,17 @@ def main():
     except ConnectionResetError as connectionResetError:
         print("ConnectionReset error: {0}".format(connectionResetError))
 
+    except RuntimeError as runTimeError:
+        print("RuntimeError error: {0}".format(runTimeError))
+
     finally:
         sock.close()
         sys.exit(1)
 
 
 """ Reads the config file and return the values from it"""
+
+
 def load_config_file():
     global value_from_config
     with open('opt.conf') as file:
@@ -195,6 +200,8 @@ def load_config_file():
 
 
 """Gets the value of KeepALive value from the load_config_file"""
+
+
 def read_heartbeat():
     global true_or_false
     load_config_file()
@@ -204,6 +211,8 @@ def read_heartbeat():
 
 
 """Gets the value of PackagePerSeconds value from the load_config_file"""
+
+
 def read_DDoS():
     global package_per_seconds
     load_config_file()
@@ -211,34 +220,30 @@ def read_DDoS():
     print(package_per_seconds)
     return package_per_seconds
 
-
 time_loop_heartbeat = Timeloop()
-time_loop_send_DDoS = Timeloop()
 
 """Make the DDOS with multiprocessing"""
-@time_loop_send_DDoS.job(interval=timedelta(seconds=1))
-def DDoS_job_every_1s(package_per_seconds):
 
-    running = True
-    while running:
-        print("1s job current time : {}".format(time.ctime()))
-        global sequence_number
-        global server_address
+def DDoS_job(package_per_seconds):
+    global sequence_number
+    global server_address
 
-        """For loop that iterates over the number of package_per_seconds"""
-        for i in range(package_per_seconds):
-            ddos_to_server = "msg-" + str(sequence_number) + " = " + "message"
-            print("C: " + ddos_to_server)
+    """For loop that iterates over the number of package_per_seconds"""
+    for i in range(package_per_seconds):
+        ddos_to_server = "msg-" + str(sequence_number) + " = " + "message"
+        print("C: " + ddos_to_server)
 
-            p = multiprocessing.Process(target=sock.sendto, args=(ddos_to_server.encode(), server_address))
-            p.start()
+        p = multiprocessing.Process(target=sock.sendto, args=(ddos_to_server.encode(), server_address))
+        p.start()
 
-            """Get the answer back from server - if receive_message return False then the server has shutdown"""
-            if not receive_message():
-                running = False
+        """Get the answer back from server - if receive_message return False then the server has shutdown"""
+        if not receive_message():
+            return
 
 
 """Timeloop of heartbeat that every 3 seconds checks if there has been send a message, and if not, then sends a heartbeat"""
+
+
 @time_loop_heartbeat.job(interval=timedelta(seconds=3))
 def heartbeat_job_every_3s():
     global server_address
@@ -248,7 +253,6 @@ def heartbeat_job_every_3s():
         heartbeat = "con-h 0x00"
         print("C: " + heartbeat)
         sock.sendto(heartbeat.encode(), server_address)
-        # print("3s job current time : {}".format(time.ctime()))
 
         """Get the answer back from server - if receive_message return False then the server has shutdown"""
         if not receive_message():
@@ -267,7 +271,6 @@ if __name__ == "__main__":
      configParser = configparser.RawConfigParser()
      configParser.read('opt.ini')
      true_or_false = configParser.get('HEARTBEAT', 'KeepALive')
-
      if true_or_false.__eq__("True"):
          time_loop.start(block=False)
 """
