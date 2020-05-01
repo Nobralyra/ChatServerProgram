@@ -1,8 +1,6 @@
 import multiprocessing
 import socket
 import sys
-import time
-import threading
 
 import yaml
 from timeloop import Timeloop
@@ -72,15 +70,15 @@ Sets the is_send_message to True because there has been send a manual message
 
 
 def send_message():
-    while True:
-        global sequence_number
-        global is_send_message
-        print("Write a message")
-        message = input()
-        message_to_server = "msg-" + str(sequence_number) + " = " + message
-        sock.sendto(message_to_server.encode(), server_address)
-        print("C: " + message_to_server)
-        is_send_message = True
+    global sequence_number
+    global is_send_message
+    print("Write a message")
+    message = input()
+    message_to_server = "msg-" + str(sequence_number) + " = " + message
+    sock.sendto(message_to_server.encode(), server_address)
+    print("C: " + message_to_server)
+    is_send_message = True
+    return
 
 
 """
@@ -98,37 +96,41 @@ def receive_message():
 
     global sequence_number
 
-    receive_message_from_server, server_address = sock.recvfrom(bytes_to_be_read)
-    print("S: " + receive_message_from_server.decode())
+    while True:
+        receive_message_from_server, server_address = sock.recvfrom(bytes_to_be_read)
+        print("S: " + receive_message_from_server.decode())
 
-    do_res_match = receive_message_from_server.decode().split("-")[0]
+        do_res_match = receive_message_from_server.decode().split("-")[0]
 
-    # When the server is closing it sends af 0xFe
-    if receive_message_from_server.decode().__eq__("0xFE"):
-        tolerance_message = "0xFF"
-        print("C: " + tolerance_message)
-        sock.sendto(tolerance_message.encode(), server_address)
-        return False
+        # When the server is closing it sends af 0xFe
+        if receive_message_from_server.decode().__eq__("0xFE"):
+            tolerance_message = "0xFF"
+            print("C: " + tolerance_message)
+            sock.sendto(tolerance_message.encode(), server_address)
+            return False
 
-    # If it the server closes because of to many packages
-    if receive_message_from_server.decode().__eq__("Limit exceeded with maximum packages per seconds"):
-        print("Server said no")
-        raise Exception
+        # If it the server closes because of to many packages
+        if receive_message_from_server.decode().__eq__("Limit exceeded with maximum packages per seconds"):
+            return False
 
-    do_seg_number_match = receive_message_from_server.decode().split(" ")[0].split("-")[1]
+        # If it the server closes because msg protocol is wrong or heartbeat
+        if receive_message_from_server.decode().__eq__("msg protocol has an error. Closing the server"):
+            raise ConnectionResetError
 
-    if receive_message_from_server.decode().__eq__("con-a"):
-        return True
+        do_seg_number_match = receive_message_from_server.decode().split(" ")[0].split("-")[1]
 
-    if do_res_match.__eq__("res") and do_seg_number_match.__eq__(str(sequence_number + 1)):
-        sequence_number += 2
-        return True
+        if receive_message_from_server.decode().__eq__("con-a"):
+            return True
 
-    else:
-        error_with_message_server = "Invalid message. Closing the client"
-        print("C: " + error_with_message_server)
-        sock.sendto(error_with_message_server.encode(), server_address)
-        return False
+        if do_res_match.__eq__("res") and do_seg_number_match.__eq__(str(sequence_number + 1)):
+            sequence_number += 2
+            return True
+
+        else:
+            error_with_message_server = "Invalid message. Closing the client"
+            print("C: " + error_with_message_server)
+            sock.sendto(error_with_message_server.encode(), server_address)
+            return False
 
 
 def main():
@@ -136,25 +138,27 @@ def main():
     means something wrong happen """
     try:
         read_heartbeat()
-        read_DDoS()
 
         """If the KeepALive value is None then raise ValueError"""
-        if true_or_false is not None and true_or_false.__eq__("True"):
+        if true_or_false is None:
+            raise ValueError
+
+        """Check if the heartbeat should start or not"""
+        if true_or_false.__eq__("True"):
             time_loop_heartbeat.start(block=False)
 
+        read_DDoS()
         """If the package_per_seconds value is bigger than 0 then run DDOS"""
         if isinstance(package_per_seconds, int) and not None and package_per_seconds > 0:
-            DDoS_job_every_1s(package_per_seconds)
-
-        send_message_handle.start()
-        receive_message_handle.start()
+            DDoS_job(package_per_seconds)
 
         while True:
+            send_message()
+
             """When we get the 0xFE from the server and sends a 0xFF back, we do not receive an answer 
             because the server already has closed the socket"""
             if not receive_message():
-                raise ConnectionResetError
-            break
+                break
 
     except OSError as oSError:
         print("OS error: {0}".format(oSError))
@@ -218,16 +222,11 @@ def read_DDoS():
     print(package_per_seconds)
     return package_per_seconds
 
-
-send_message_handle = threading.Thread(target=send_message, daemon=True)
-receive_message_handle = threading.Thread(target=receive_message, daemon=True)
 time_loop_heartbeat = Timeloop()
 
 """Make the DDOS with multiprocessing"""
 
-
-def DDoS_job_every_1s(package_per_seconds):
-    print("1s job current time : {}".format(time.ctime()))
+def DDoS_job(package_per_seconds):
     global sequence_number
     global server_address
 
@@ -241,11 +240,10 @@ def DDoS_job_every_1s(package_per_seconds):
 
         """Get the answer back from server - if receive_message return False then the server has shutdown"""
         if not receive_message():
-            raise
+            return
 
 
 """Timeloop of heartbeat that every 3 seconds checks if there has been send a message, and if not, then sends a heartbeat"""
-
 
 @time_loop_heartbeat.job(interval=timedelta(seconds=3))
 def heartbeat_job_every_3s():
@@ -256,11 +254,10 @@ def heartbeat_job_every_3s():
         heartbeat = "con-h 0x00"
         print("C: " + heartbeat)
         sock.sendto(heartbeat.encode(), server_address)
-        # print("3s job current time : {}".format(time.ctime()))
 
         """Get the answer back from server - if receive_message return False then the server has shutdown"""
         if not receive_message():
-            raise ConnectionResetError
+            raise
 
         """Resets the is_send_message after 3 seconds if there has been send a manual messages"""
     else:
@@ -271,12 +268,10 @@ if __name__ == "__main__":
     if handshake():
         main()
 
-
 """
      configParser = configparser.RawConfigParser()
      configParser.read('opt.ini')
      true_or_false = configParser.get('HEARTBEAT', 'KeepALive')
-
      if true_or_false.__eq__("True"):
          time_loop.start(block=False)
 """
