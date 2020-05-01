@@ -111,8 +111,11 @@ def receive_message():
 
         # If it the server closes because of to many packages
         if receive_message_from_server.decode().__eq__("Limit exceeded with maximum packages per seconds"):
-            print("Server said no")
             return False
+
+        # If it the server closes because msg protocol is wrong or heartbeat
+        if receive_message_from_server.decode().__eq__("msg protocol has an error. Closing the server"):
+            raise ConnectionResetError
 
         do_seg_number_match = receive_message_from_server.decode().split(" ")[0].split("-")[1]
 
@@ -182,6 +185,7 @@ def main():
         print("RuntimeError error: {0}".format(runTimeError))
 
     finally:
+        time_loop_heartbeat.stop()
         sock.close()
         sys.exit(1)
 
@@ -254,7 +258,7 @@ def heartbeat_job_every_3s():
 
         """Get the answer back from server - if receive_message return False then the server has shutdown"""
         if not receive_message():
-            raise ConnectionResetError
+            raise
 
         """Resets the is_send_message after 3 seconds if there has been send a manual messages"""
     else:

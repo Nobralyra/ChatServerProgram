@@ -74,8 +74,8 @@ def send_message():
     print("Write a message")
     message = input()
 
-    #Try to start at the wrong sequence number
-    message_to_server = "msg-" + str(sequence_number+1) + " = " + message
+    #Try to start a wrong negatibe sequence number
+    message_to_server = "msg-" + str(-1) + " = " + message
     sock.sendto(message_to_server.encode(), server_address)
     print("C: " + message_to_server)
     is_send_message = True
@@ -112,8 +112,11 @@ def receive_message():
 
         # If it the server closes because of to many packages
         if receive_message_from_server.decode().__eq__("Limit exceeded with maximum packages per seconds"):
-            print("Server said no")
             return False
+
+        # If it the server closes because msg protocol is wrong or heartbeat
+        if receive_message_from_server.decode().__eq__("msg protocol has an error. Closing the server"):
+            raise ConnectionResetError
 
         do_seg_number_match = receive_message_from_server.decode().split(" ")[0].split("-")[1]
 
@@ -256,7 +259,7 @@ def heartbeat_job_every_3s():
 
         """Get the answer back from server - if receive_message return False then the server has shutdown"""
         if not receive_message():
-            raise ConnectionResetError
+            raise
 
         """Resets the is_send_message after 3 seconds if there has been send a manual messages"""
     else:
