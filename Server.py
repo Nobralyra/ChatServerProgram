@@ -129,6 +129,7 @@ def receive_message():
             do_msg_match = receive_message_from_client.decode().split("-")[0]
 
             do_seg_number_match = receive_message_from_client.decode().split(" ")[0].split("-")[1]
+            do_heart_beat_hex_match = receive_message_from_client.decode().split(" ")[1]
 
             if do_msg_match.__eq__("msg") and do_seg_number_match.__eq__(str(sequence_number)) and first_message:
                 first_message = False
@@ -138,10 +139,8 @@ def receive_message():
                 sequence_number += 1
                 send_message(address)
 
-            do_heart_beat_hex_match = receive_message_from_client.decode().split(" ")[1]
-
             # Sends a heartbeat responds back to client
-            if do_msg_match.__eq__("con") and do_seg_number_match.__eq__("h") and do_heart_beat_hex_match.__eq__("0x00"):
+            elif do_msg_match.__eq__("con") and do_seg_number_match.__eq__("h") and do_heart_beat_hex_match.__eq__("0x00"):
                 accept_heartbeat = "con-a"
                 print("S: " + accept_heartbeat)
                 sock.sendto(accept_heartbeat.encode(), address)
