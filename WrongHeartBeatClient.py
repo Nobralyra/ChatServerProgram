@@ -252,7 +252,7 @@ def heartbeat_job_every_3s():
     global is_send_message
 
     if is_send_message.__eq__(False):
-        heartbeat = "con-h 0x00"
+        heartbeat = "con-h 0"
         print("C: " + heartbeat)
         sock.sendto(heartbeat.encode(), server_address)
 
